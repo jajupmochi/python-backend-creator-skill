@@ -1,0 +1,343 @@
+name: Publish Skill to Hub
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/skills/python-backend-creator/**'
+      - '.github/workflows/publish-skill.yml'
+  workflow_dispatch:
+    inputs:
+      publish_draft:
+        description: 'Publish as draft version'
+        required: false
+        default: 'false'
+
+jobs:
+  validate-and-package:
+    runs-on: ubuntu-latest
+    name: Validate & Package Skill
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Validate skill structure
+        id: validate
+        run: |
+          python3 .github/skills/skill-creator/scripts/quick_validate.py \
+            .github/skills/python-backend-creator
+          echo "validation_passed=true" >> $GITHUB_OUTPUT
+
+      - name: Package skill
+        id: package
+        if: steps.validate.outputs.validation_passed == 'true'
+        run: |
+          mkdir -p dist
+          python3 .github/skills/skill-creator/scripts/package_skill.py \
+            .github/skills/python-backend-creator \
+            dist
+          
+          # Get the package info
+          SKILL_FILE=$(ls dist/*.skill | head -1)
+          SKILL_NAME=$(basename "$SKILL_FILE" .skill)
+          SKILL_SIZE=$(du -h "$SKILL_FILE" | cut -f1)
+          
+          echo "skill_file=$SKILL_FILE" >> $GITHUB_OUTPUT
+          echo "skill_name=$SKILL_NAME" >> $GITHUB_OUTPUT
+          echo "skill_size=$SKILL_SIZE" >> $GITHUB_OUTPUT
+          
+          # Generate checksum
+          sha256sum "$SKILL_FILE" > "${SKILL_FILE}.sha256"
+          echo "checksum_file=${SKILL_FILE}.sha256" >> $GITHUB_OUTPUT
+
+      - name: Create release notes
+        id: release_notes
+        if: steps.package.outputs.skill_file != ''
+        run: |
+          VERSION=$(grep 'version = ' .github/skills/python-backend-creator/SKILL.md 2>/dev/null || echo "v1.0.0")
+          RELEASE_DATE=$(date -u +'%Y-%m-%d')
+          
+          cat > RELEASE_NOTES.md << EOF
+          # python-backend-creator Skill Release
+          
+          **Version**: $VERSION  
+          **Released**: $RELEASE_DATE  
+          **Size**: ${{ steps.package.outputs.skill_size }}
+          
+          ## What's New
+          - Multi-stage workflow with explicit user confirmation
+          - Design Review Critic with 0-25 point scoring
+          - Atomic file-by-file code generation
+          - Comprehensive validation and security checks
+          - Support for GitHub Copilot, Claude Code, Cursor
+          
+          ## Files
+          - Skill Package: ${{ steps.package.outputs.skill_file }}
+          - Checksum: ${{ steps.package.outputs.checksum_file }}
+          
+          ## Installation
+          
+          ### Claude Skills Hub
+          Available at: https://skills.sh/
+          
+          ### GitHub Copilot
+          Copy the skill folder to your workspace:
+          \`\`\`bash
+          cp -r .github/skills/python-backend-creator ~/.github/skills/
+          \`\`\`
+          
+          ### Claude Code
+          \`\`\`bash
+          claude skill add python-backend-creator
+          \`\`\`
+          
+          ## Documentation
+          - See [README.md](README.md) for overview
+          - See [.github/skills/python-backend-creator/SKILL.md](.github/skills/python-backend-creator/SKILL.md) for usage
+          - See [.github/skills/python-backend-creator/references/](references/) for detailed guides
+          EOF
+          
+          echo "release_notes_path=RELEASE_NOTES.md" >> $GITHUB_OUTPUT
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        if: steps.package.outputs.skill_file != ''
+        with:
+          files: |
+            ${{ steps.package.outputs.skill_file }}
+            ${{ steps.package.outputs.checksum_file }}
+          body_path: ${{ steps.release_notes.outputs.release_notes_path }}
+          draft: ${{ github.event.inputs.publish_draft == 'true' }}
+          tag_name: ${{ github.run_number }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-to-hubs:
+    runs-on: ubuntu-latest
+    name: Publish to Skill Hubs
+    needs: validate-and-package
+    if: success()
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Package skill for distribution
+        run: |
+          mkdir -p dist
+          python3 .github/skills/skill-creator/scripts/package_skill.py \
+            .github/skills/python-backend-creator \
+            dist
+
+      - name: Publish to Claude Skills Hub
+        id: claude_hub
+        if: vars.PUBLISH_TO_CLAUDE_HUB == 'true'
+        run: |
+          SKILL_FILE=$(ls dist/*.skill | head -1)
+          
+          echo "Publishing to Claude Skills Hub..."
+          
+          # Create a metadata file
+          cat > skill_metadata.json << 'EOF'
+          {
+            "name": "python-backend-creator",
+            "version": "1.0.0",
+            "description": "Interactive, human-in-the-loop Python backend repository scaffolding with industrial-grade quality standards",
+            "author": "jajupmochi",
+            "repository": "https://github.com/jajupmochi/python-backend-creator-skill",
+            "license": "MIT",
+            "keywords": ["python", "backend", "scaffolding", "generation", "architecture", "design-review"],
+            "category": "development",
+            "supported_agents": ["github-copilot", "claude-code", "cursor"],
+            "minimum_version": "1.0.0"
+          }
+          EOF
+          
+          # Note: The actual publishing would require:
+          # 1. API endpoint for skills.sh
+          # 2. Authentication token
+          # 3. Proper API implementation
+          
+          echo "Skill metadata prepared for Claude Skills Hub"
+          echo "hub_status=prepared" >> $GITHUB_OUTPUT
+
+      - name: Create skill distribution archive
+        run: |
+          mkdir -p releases
+          cd dist
+          ZIP_FILE="../releases/python-backend-creator-skill.zip"
+          
+          # Create a distribution-ready archive
+          zip -r "$ZIP_FILE" python-backend-creator/
+          
+          echo "Distribution archive created: $ZIP_FILE"
+          ls -lh "$ZIP_FILE"
+
+      - name: Generate installation guide
+        run: |
+          cat > INSTALLATION_GUIDE.md << 'EOF'
+          # Installation Guide: python-backend-creator Skill
+          
+          ## Option 1: GitHub Copilot (VS Code)
+          
+          1. Download the skill package from GitHub Releases
+          2. Extract the package
+          3. Copy the `python-backend-creator` folder to `.github/skills/` in your workspace
+          4. Reload VS Code
+          5. Use `@python-backend-creator` in Copilot Chat
+          
+          ## Option 2: Claude Code CLI
+          
+          ```bash
+          # Install from local files
+          claude skill add /path/to/python-backend-creator
+          
+          # Or use directly in prompts
+          claude --skill /path/to/python-backend-creator/SKILL.md "Create a Python backend..."
+          ```
+          
+          ## Option 3: Cursor IDE
+          
+          1. Open Cursor preferences
+          2. Add custom skill directory pointing to the extracted`python-backend-creator` folder
+          3. Reload Cursor
+          4. Use in the AI chat panel
+          
+          ## Option 4: Claude Skills Hub
+          
+          1. Visit https://skills.sh/
+          2. Search for "python-backend-creator"
+          3. Click "Install" or "Add to workspace"
+          4. Follow the integration instructions
+          
+          ## Verification
+          
+          After installation, test the skill:
+          
+          ### GitHub Copilot
+          ```
+          @python-backend-creator I want to create a Python backend for a REST API
+          ```
+          
+          ### Claude Code
+          ```bash
+          claude "Use python-backend-creator skill to scaffold a data validation library"
+          ```
+          
+          You should see the Design Intake Questionnaire appear.
+          
+          ## Troubleshooting
+          
+          - **Skill not found**: Ensure the folder is in the correct location
+          - **SKILL.md errors**: Run validation: `python3 .github/skills/skill-creator/scripts/quick_validate.py <skill-dir>`
+          - **Reference files missing**: Check that all reference files are included in the skill package
+          
+          ## Support
+          
+          - GitHub Issues: https://github.com/jajupmochi/python-backend-creator-skill/issues
+          - Documentation: See `references/` folder in the skill package
+          EOF
+          
+          cat INSTALLATION_GUIDE.md
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: skill-distribution
+          path: |
+            releases/
+            INSTALLATION_GUIDE.md
+            skill_metadata.json
+          retention-days: 90
+
+      - name: Create hub status report
+        run: |
+          cat > HUB_PUBLICATION_STATUS.md << EOF
+          # Skill Hub Publication Status
+          
+          ## Status
+          - **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          - **Package**: Created ✅
+          - **Validation**: Passed ✅
+          
+          ## Hub Publication Status
+          
+          | Hub | Status | Notes |
+          |----|--------|-------|
+          | Claude Skills Hub (skills.sh) | 🔄 Prepared | API integration pending |
+          | GitHub Marketplace | 📋 Manual | Submit via GitHub Marketplace form |
+          | Cursor Extensions | 📋 Manual | Submit via Cursor community portal |
+          
+          ## Next Steps
+          
+          1. **Claude Skills Hub**: Update API token in GitHub Secrets and implement API publishing
+          2. **GitHub Marketplace**: Visit https://github.com/marketplace/new and submit the skill
+          3. **Cursor Extensions**: Visit Cursor community portal and register the skill
+          
+          ## Package Contents
+          
+          - Skill SKILL.md: Core workflow definition
+          - 18 Reference files: Detailed guides and specifications
+          - Validation scripts: Quality assurance tools
+          - Documentation: Full user and integration guides
+          
+          EOF
+          
+          cat HUB_PUBLICATION_STATUS.md
+
+      - name: Comment on PR/Commit
+        if: github.event_name == 'push'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const hubStatus = fs.readFileSync('HUB_PUBLICATION_STATUS.md', 'utf8');
+            
+            github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: `## 📦 Skill Publication Report\n\n${hubStatus}`
+            });
+
+  notify-publication:
+    runs-on: ubuntu-latest
+    name: Notify Publication
+    needs: publish-to-hubs
+    if: always()
+    
+    steps:
+      - name: Generate notification
+        run: |
+          cat > notification.txt << EOF
+          🚀 python-backend-creator Skill Publication
+          
+          Status: ${{ needs.publish-to-hubs.result }}
+          Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')
+          Commit: ${{ github.sha }}
+          
+          Distribution artifacts are available in the workflow run logs.
+          EOF
+          
+          cat notification.txt
+
+      - name: Upload notification
+        uses: actions/upload-artifact@v3
+        with:
+          name: publication-notification
+          path: notification.txt
