@@ -30,6 +30,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
       - name: Validate skill structure
         id: validate
         run: |
@@ -136,6 +141,11 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
 
       - name: Package skill for distribution
         run: |
@@ -256,7 +266,7 @@ jobs:
           cat INSTALLATION_GUIDE.md
 
       - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: skill-distribution
           path: |
@@ -337,7 +347,7 @@ jobs:
           cat notification.txt
 
       - name: Upload notification
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: publication-notification
           path: notification.txt
