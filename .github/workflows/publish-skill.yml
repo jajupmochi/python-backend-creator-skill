@@ -194,10 +194,10 @@ jobs:
       - name: Create skill distribution archive
         run: |
           mkdir -p releases
-          cd dist
-          ZIP_FILE="../releases/python-backend-creator-skill.zip"
           
-          # Create a distribution-ready archive
+          # Package the skill files directly from source
+          cd .github/skills
+          ZIP_FILE="../../releases/python-backend-creator-skill.zip"
           zip -r "$ZIP_FILE" python-backend-creator/
           
           echo "Distribution archive created: $ZIP_FILE"
