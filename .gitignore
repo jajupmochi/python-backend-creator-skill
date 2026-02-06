@@ -1,4 +1,24 @@
+# IDE
 /.idea
-/.venv
 /.vscode
+
+# Python
+/.venv
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Build outputs
+/dist/
+/releases/
+
+# Testing artifacts
+*_TEST.md
+CICD_COMPLETION_SUMMARY.md
+
+# Checksums
+*.sha256
+
+# Project specific
 /pyproject.toml
